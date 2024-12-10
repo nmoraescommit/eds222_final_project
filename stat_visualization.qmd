@@ -1,0 +1,87 @@
+---
+title: "plots"
+author: "NM"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(here)
+library(tmap)
+library(ggplot2)
+library(sf)
+library(terra)
+library(raster)
+library(tidycensus)
+library(data.table)
+```
+
+```{r}
+# Visualize temperature data distribution
+santaclara_temp_sj <- santaclara_temp %>%
+  filter(station == 'San Jose')
+
+santaclara_temp_rh <- santaclara_temp %>%
+  filter(station == 'Reid-Hill')
+
+santaclara_temp_m <- santaclara_temp %>%
+  filter(station == 'Moffett')
+
+sj_temp_dist <- ggplot(data = santaclara_temp_sj, aes(x = max_temp))+
+  geom_histogram(binwidth = 2)
+
+rh_temp_dist <- ggplot(data = santaclara_temp_rh, aes(x = max_temp))+
+  geom_histogram(binwidth = 2)
+
+m_temp_dist <- ggplot(data = santaclara_temp_m, aes(x = max_temp))+
+  geom_histogram(binwidth = 2)
+
+sj_temp_dist
+rh_temp_dist
+m_temp_dist
+```
+
+```{r}
+# Difference in proportions of days over 90?
+hot_days_prop_plot <- ggplot(data = santaclara_temp, aes(station, fill = factor(over_90)))+
+  geom_bar() +
+ scale_fill_brewer("Temp >= 90", palette = "Dark2")
+
+hot_days_prop_plot
+```
+
+Use chi-square goodness of fit test to determine if frequency of number of days over 90 degrees Celsius are different to our expected null hypothesis. We want to test a hypothesis about 
+
+H0: The proportion of days of 90 degrees Celsius or higher, measured at San Jose, Moffett and Reid-Hill from 2009 - 2023, are the same.
+HA: The proportion of days of 90 degrees Celsius or higher, measured at San Jose, Moffett and Reid-Hill from 2009 - 2023, are different.
+
+```{r}
+# Create a data frame from our larger table
+chi_table_clean <- santaclara_temp %>%
+  subset(., select = c(station, over_90))
+
+#chi_table <- data.frame(station=c('San Jose', 'Reid_Hill', 'Moffett'),
+ #                            over_90=c(219, 430, 83),
+  #                           under_90=c(5259, 4937, 4590))
+
+chi_table_test <- table(chi_table_clean$station, chi_table_clean$over_90)
+
+print(chi_table_test)
+```
+
+```{r}
+# Apply chisq.test()
+chisq.test(chi_table_test)
+```
+
+Take RH and Moffett and run a lm - to determine if means of 
+
+```{r}
+income_station_regression <- lm(formula = max_temp ~ mean_income, data = santaclara_temp)
+
+summary(income_station_regression)
+```
+
+chi2 and then regression coefficient - ANOVA if time

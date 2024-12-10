@@ -1,0 +1,382 @@
+---
+title: "Bay Area: Income and Temperature Analysis"
+author: "Naomi Moraes"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(here)
+library(tmap)
+library(ggplot2)
+library(sf)
+library(terra)
+library(raster)
+library(tidycensus)
+library(data.table)
+```
+
+```{r}
+census_api_key("588cb17ff33d9c1db3df956f8bbe31f7b646915f")
+```
+
+```{r}
+# import temp data
+sanjose <- read.csv(here::here('raw_data','sanjose_temp.csv'))
+reidhill <- read.csv(here::here('raw_data','reid_hill_temp.csv'))
+moffett <- read.csv(here::here('raw_data','moffett_temp.csv'))
+
+# import census shapefiles of santa clara county
+santa_clara_geo_09 <- sf::read_sf(here::here('raw_data','2009','tl_2009_06085_tract00.shp')) %>%
+  mutate(GEOID = CTIDFP00) %>%
+  subset(., select = - CTIDFP00)
+
+santa_clara_geo_14 <- sf::read_sf(here::here('raw_data','2014','tl_2014_06_tract.shp')) %>% filter(COUNTYFP == '085')
+santa_clara_geo_19 <- sf::read_sf(here::here('raw_data','2019','tl_2019_06_tract.shp')) %>% filter(COUNTYFP == '085')
+santa_clara_geo_23 <- sf::read_sf(here::here('raw_data','2023','tl_2023_06_tract.shp')) %>% filter(COUNTYFP == '085')
+  
+```
+
+Clean hourly temp in reidhill, to create max daily dry bulb temp, as in the other station points.
+
+```{r}
+reidhill$max_temp_hourly[reidhill$max_temp_hourly == '*'] <- 0
+
+reidhill <- reidhill %>%
+  group_by(date) %>%
+  mutate(max_temp = max(max_temp_hourly)) %>%
+  subset(., select = - max_temp_hourly) %>%
+  distinct(., x = date, .keep_all = TRUE) %>%
+  subset(., select = - c(x,X)) %>%
+  mutate(station = 'Reid-Hill')
+ 
+sanjose$max_temp_hourly[sanjose$max_temp_hourly == '*'] <- 0
+
+sanjose <- sanjose %>%
+  group_by(date) %>%
+  mutate(max_temp = max(max_temp_hourly)) %>%
+  subset(., select = - max_temp_hourly) %>%
+  distinct(., x = date, .keep_all = TRUE) %>%
+  subset(., select = - c(x,X)) %>%
+  mutate(station = 'San Jose')
+
+moffett$max_temp_hourly[moffett$max_temp_hourly == '*'] <- 0
+
+moffett <- moffett %>%
+  group_by(date) %>%
+  mutate(max_temp = max(max_temp_hourly)) %>%
+  subset(., select = - max_temp_hourly) %>%
+  distinct(., x = date, .keep_all = TRUE) %>%
+  subset(., select = - c(x,X)) %>%
+  mutate(station = 'Moffett')
+```
+
+```{r}
+# Combine to create one giant data set
+santaclara_temp <- rbind(sanjose, moffett, reidhill) %>%
+  mutate(over_90 = max_temp >= 90) %>%
+  mutate(date = lubridate::ymd(date)) %>%
+  filter((date >= '2009-01-01') & (date <= '2023-12-31'))
+```
+
+
+Select census tracts within a 2 mile radius of the selected temperature measuring stations
+
+```{r}
+# Find CRS of santa clara 09
+st_crs(santa_clara_geo_09)
+# Find CRS of santa clara 14
+st_crs(santa_clara_geo_14)
+# Find CRS of santa clara 19
+st_crs(santa_clara_geo_19)
+# Find CRS of santa clara 23
+st_crs(santa_clara_geo_23)
+```
+
+
+```{r}
+# Create points for the three stations
+reidhill_df <- data.table(
+                 place=c("San Jose"),
+                 longitude=c(-121.82084305933446),
+                 latitude=c(37.33754123307406))
+
+reidhill_sf = st_as_sf(reidhill_df, coords = c("longitude", "latitude"), 
+                 crs = st_crs(santa_clara_geo_09), agr = "constant")
+
+sanjose_df <- data.table(
+                 place=c("San Jose"),
+                 longitude=c(-121.92795137054253),
+                 latitude=c(37.36852024984821))
+
+sanjose_sf = st_as_sf(sanjose_df, coords = c("longitude", "latitude"), 
+                 crs = st_crs(santa_clara_geo_09), agr = "constant")
+
+moffett_df <- data.table(
+                 place=c("San Jose"),
+                 longitude=c(-122.05076142705437),
+                 latitude=c(37.4092516119361))
+ 
+moffett_sf = st_as_sf(moffett_df, coords = c("longitude", "latitude"), 
+                 crs = st_crs(santa_clara_geo_09), agr = "constant")
+
+```
+
+```{r}
+# use intersect to find census tracts within 2 mile radius of temperature sensing points
+sanjose_buffer <- st_buffer(sanjose_sf, 4500)
+reidhill_buffer <- st_buffer(reidhill_sf, 4500)
+moffett_buffer <- st_buffer(moffett_sf, 4500)
+```
+
+Find where buffer zones intersect with the 4 census tract tables
+```{r}
+# Find census tracts that intersect with buffer zones
+sanjose_censustract_09 <- st_intersection(sanjose_buffer, santa_clara_geo_09)
+reidhill_censustract_09 <- st_intersection(reidhill_buffer, santa_clara_geo_09)
+moffett_censustract_09<- st_intersection(moffett_buffer, santa_clara_geo_09)
+
+# Find census tracts that intersect with buffer zones
+sanjose_censustract_14 <- st_intersection(sanjose_buffer, santa_clara_geo_14)
+reidhill_censustract_14 <- st_intersection(reidhill_buffer, santa_clara_geo_14)
+moffett_censustract_14 <- st_intersection(moffett_buffer, santa_clara_geo_14)
+
+# Find census tracts that intersect with buffer zones
+sanjose_censustract_19 <- st_intersection(sanjose_buffer, santa_clara_geo_19)
+reidhill_censustract_19 <- st_intersection(reidhill_buffer, santa_clara_geo_19)
+moffett_censustract_19 <- st_intersection(moffett_buffer, santa_clara_geo_19)
+
+# Find census tracts that intersect with buffer zones
+sanjose_censustract_23 <- st_intersection(sanjose_buffer, santa_clara_geo_23)
+reidhill_censustract_23 <- st_intersection(reidhill_buffer, santa_clara_geo_23)
+moffett_censustract_23 <- st_intersection(moffett_buffer, santa_clara_geo_23)
+```
+
+```{r}
+# Match census tract with 5 year ACS of median income in the years 
+nine_income <- get_acs(geography = 'tract',
+                  variables = "B19013_001E",
+                  state = "CA",
+                  county = 'Santa Clara',
+                  year = 2009)
+
+fourteen_income <- get_acs(geography = 'tract',
+                  variables = "B19013_001E",
+                  state = "CA",
+                  county = 'Santa Clara',
+                  year = 2014)
+
+nineteen_income <- get_acs(geography = 'tract',
+                  variables = "B19013_001E",
+                  state = "CA",
+                  county = 'Santa Clara',
+                  year = 2019)
+
+twentythree_income <- get_acs(geography = 'tract',
+                  variables = "B19013_001E",
+                  state = "CA",
+                  county = 'Santa Clara',
+                  year = 2022) # Couldn't pull 2023, used 2022 instead
+```
+
+use census tracts 2009, 2014, 2019, 2023 and five year census data ending in these years to find four maps (follow the path). Then connect five year census data to respective census tract - eg. connect median income to each tract. Then for the five year chunk find count of temps above 
+
+```{r}
+nine_income <- nine_income[c('GEOID','estimate')]
+
+santa_clara_income_09 <- left_join(santa_clara_geo_09,nine_income,by= 'GEOID') %>%
+  subset(., select = c(estimate, GEOID)) %>%
+  st_drop_geometry()
+```
+
+```{r}
+fourteen_income <- fourteen_income[c('GEOID','estimate')]
+
+santa_clara_income_14 <- left_join(santa_clara_geo_14, fourteen_income,by= 'GEOID') %>%
+  subset(., select = c(estimate, GEOID)) %>%
+  st_drop_geometry()
+```
+
+```{r}
+nineteen_income <- nineteen_income[c('GEOID','estimate')]
+
+santa_clara_income_19 <- left_join(santa_clara_geo_19, nineteen_income,by= 'GEOID') %>%
+  subset(., select = c(estimate, GEOID)) %>%
+  st_drop_geometry()
+```
+
+```{r}
+twentythree_income <- twentythree_income[c('GEOID','estimate')]
+
+santa_clara_income_23 <- left_join(santa_clara_geo_23, twentythree_income,by= 'GEOID') %>%
+  subset(., select = c(estimate, GEOID)) %>%
+  st_drop_geometry()
+```
+
+Create intersection where census tract buffers - by year and location - intersect with income dataframe of respective years
+
+```{r}
+# Find census tracts that intersect with buffer zones
+sanjose_income_09 <- left_join(sanjose_censustract_09, santa_clara_income_09, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+sanjose_income_09_mean <- mean(sanjose_income_09$estimate)
+
+reidhill_income_09 <- left_join(reidhill_censustract_09, santa_clara_income_09, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+reidhill_income_09_mean <- mean(reidhill_income_09$estimate)
+
+moffett_income_09 <- left_join(moffett_censustract_09, santa_clara_income_09, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+moffett_income_09_mean <- mean(moffett_income_09$estimate)
+```
+
+```{r}
+# Find census tracts that intersect with buffer zones
+sanjose_income_14 <- left_join(sanjose_censustract_14, santa_clara_income_14, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+sanjose_income_14_mean <- mean(sanjose_income_14$estimate)
+
+reidhill_income_14 <- left_join(reidhill_censustract_14, santa_clara_income_14, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+reidhill_income_14_mean <- mean(reidhill_income_14$estimate)
+
+moffett_income_14 <- left_join(moffett_censustract_14, santa_clara_income_14, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+moffett_income_14_mean <- mean(moffett_income_14$estimate)
+```
+
+```{r}
+# Find census tracts that intersect with buffer zones
+sanjose_income_19 <- left_join(sanjose_censustract_19, santa_clara_income_19, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+sanjose_income_19_mean <- mean(sanjose_income_19$estimate)
+
+reidhill_income_19 <- left_join(reidhill_censustract_19, santa_clara_income_19, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+reidhill_income_19_mean <- mean(reidhill_income_19$estimate)
+
+moffett_income_19 <- left_join(moffett_censustract_19, santa_clara_income_19, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+moffett_income_19_mean <- mean(moffett_income_19$estimate)
+```
+
+```{r}
+# Find census tracts that intersect with buffer zones
+sanjose_income_23 <- left_join(sanjose_censustract_23, santa_clara_income_23, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+sanjose_income_23_mean <- mean(sanjose_income_23$estimate)
+
+reidhill_income_23 <- left_join(reidhill_censustract_23, santa_clara_income_23, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+reidhill_income_23_mean <- mean(reidhill_income_23$estimate)
+
+moffett_income_23 <- left_join(moffett_censustract_23, santa_clara_income_23, by = 'GEOID') %>%
+  subset(., select = c(place, estimate)) %>%
+  st_drop_geometry()
+
+moffett_income_23_mean <- mean(moffett_income_23$estimate)
+```
+
+```{r}
+# Add means to santaclara_temp
+santaclara_temp['mean_income'] <- santaclara_temp['max_temp']
+
+santaclara_temp <- santaclara_temp %>%
+  mutate(date = year(date))
+
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date == 2009) & (santaclara_temp$station == 'San Jose'), sanjose_income_09_mean, santaclara_temp$mean_income)
+
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date == 2009) & (santaclara_temp$station == 'Reid-Hill'), reidhill_income_09_mean, santaclara_temp$mean_income)
+
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date == 2009) & (santaclara_temp$station == 'Moffett'), moffett_income_09_mean, santaclara_temp$mean_income)
+
+# 2010 - 2014
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date >= 2010) & (santaclara_temp$date <= 2014) &(santaclara_temp$station == 'San Jose'), sanjose_income_14_mean, santaclara_temp$mean_income)
+
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date >= 2010) & (santaclara_temp$date <= 2014) & (santaclara_temp$station == 'Reid-Hill'), reidhill_income_14_mean, santaclara_temp$mean_income)
+
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date >= 2010) & (santaclara_temp$date <= 2014) & (santaclara_temp$station == 'Moffett'), moffett_income_14_mean, santaclara_temp$mean_income)
+
+# 2015 - 2019
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date >= 2015) & (santaclara_temp$date <= 2019) &(santaclara_temp$station == 'San Jose'), sanjose_income_19_mean, santaclara_temp$mean_income)
+
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date >= 2015) & (santaclara_temp$date <= 2019) & (santaclara_temp$station == 'Reid-Hill'), reidhill_income_19_mean, santaclara_temp$mean_income)
+
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date >= 2015) & (santaclara_temp$date <= 2019) & (santaclara_temp$station == 'Moffett'), moffett_income_19_mean, santaclara_temp$mean_income)
+
+# 2020 - 2023
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date >= 2020) & (santaclara_temp$date <= 2023) &(santaclara_temp$station == 'San Jose'), sanjose_income_23_mean, santaclara_temp$mean_income)
+
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date >= 2020) & (santaclara_temp$date <= 2023) & (santaclara_temp$station == 'Reid-Hill'), reidhill_income_23_mean, santaclara_temp$mean_income)
+
+santaclara_temp$mean_income <- ifelse((santaclara_temp$date >= 2020) & (santaclara_temp$date <= 2023) & (santaclara_temp$station == 'Moffett'), moffett_income_23_mean, santaclara_temp$mean_income)
+
+santaclara_temp$max_temp <- as.numeric(santaclara_temp$max_temp) %>%
+  subset('max_temp' != 0)
+
+santaclara_temp$mean_income <- as.numeric(santaclara_temp$mean_income)
+```
+
+
+
+EXTRAS
+Create a count of the number of days where the daily dry bulb maximum temperature recorded is 85 degrees. (According to MIT - wet-bulb temp 95 is the limit of human limit.)
+
+```{r}
+sanjose_max_count_total <- sanjose %>%
+  filter(max_temp >= 90) %>%
+  summarise(over_85 = n()) %>%
+  summarise(over_85 = n())
+
+sanjose_max_count_total <- sanjose %>%
+  filter(max_temp >= 90) %>%
+  summarise(over_85 = n()) %>%
+  summarise(over_85 = n())
+
+moffett_max_count_total <- moffett %>%
+  filter(max_temp >= 90) %>%
+  summarise(over_85 = n()) %>%
+  summarise(over_85 = n())
+```
+
+```{r}
+# Plot example map
+tm_shape(santa_clara_geo_09) +
+  tm_polygons() +
+  tm_shape(sanjose_sf)+
+  tm_dots() +
+  tm_shape(reidhill_sf)+
+  tm_dots()+
+  tm_shape(moffett_sf)+
+  tm_dots()+
+  tm_shape(sanjose_censustract)+
+  tm_polygons(col = 'red')+
+  tm_shape(reidhill_censustract)+
+  tm_polygons(col = 'red')+
+  tm_shape(moffett_censustract)+
+  tm_polygons(col = 'red')
+```
