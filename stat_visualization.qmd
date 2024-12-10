@@ -16,6 +16,7 @@ library(terra)
 library(raster)
 library(tidycensus)
 library(data.table)
+library(patchwork)
 ```
 
 ```{r}
@@ -30,16 +31,22 @@ santaclara_temp_m <- santaclara_temp %>%
   filter(station == 'Moffett')
 
 sj_temp_dist <- ggplot(data = santaclara_temp_sj, aes(x = max_temp))+
-  geom_histogram(binwidth = 2)
+  geom_histogram(binwidth = 2, fill = 'cornflowerblue')+
+  theme_bw() +
+  ggtitle('Temps from San Jose Mineta Airport (2009 - 2023)')
 
 rh_temp_dist <- ggplot(data = santaclara_temp_rh, aes(x = max_temp))+
-  geom_histogram(binwidth = 2)
+  geom_histogram(binwidth = 2, fill = 'cornflowerblue') +
+  theme_bw() +
+  ggtitle('Temps from Reid-Hillview Airport (2009 - 2023)')
 
 m_temp_dist <- ggplot(data = santaclara_temp_m, aes(x = max_temp))+
-  geom_histogram(binwidth = 2)
+  geom_histogram(binwidth = 2, fill = 'cornflowerblue') +
+  theme_bw() +
+  ggtitle('Temps from Moffett Federal Airfield (2009 - 2023)')
 
-sj_temp_dist
-rh_temp_dist
+sj_temp_dist /
+rh_temp_dist /
 m_temp_dist
 ```
 
@@ -47,7 +54,8 @@ m_temp_dist
 # Difference in proportions of days over 90?
 hot_days_prop_plot <- ggplot(data = santaclara_temp, aes(station, fill = factor(over_90)))+
   geom_bar() +
- scale_fill_brewer("Temp >= 90", palette = "Dark2")
+ scale_fill_brewer("Temp >= 90", palette = "Paired") +
+  ggtitle("Proportion of Days >= 90 Celsius")
 
 hot_days_prop_plot
 ```
@@ -73,15 +81,90 @@ print(chi_table_test)
 
 ```{r}
 # Apply chisq.test()
-chisq.test(chi_table_test)
+print(chisq.test(chi_table_test))
 ```
 
 Take RH and Moffett and run a lm - to determine if means of 
 
 ```{r}
-income_station_regression <- lm(formula = max_temp ~ mean_income, data = santaclara_temp)
+income_station_regression <- lm(formula = max_temp ~ mean_income + station, data = santaclara_temp)
 
 summary(income_station_regression)
 ```
 
-chi2 and then regression coefficient - ANOVA if time
+Does mean income have a relationship with station?
+
+```{r}
+ggplot(santaclara_temp, aes(station, mean_income))+
+  geom_boxplot() +
+  ggtitle("Median Income by Station")
+```
+
+H0: There is no difference between the mean incomes of reid-hill and moffett.
+HA: There is a difference between the mean incomes of reid-hill and moffett.
+
+```{r}
+santaclara_income_station <- santaclara_temp %>% filter(station %in% c('Reid-Hill', 'Moffett'))
+
+santaclara_income_station <- santaclara_income_station %>%
+  group_by(station) %>%
+  summarize(income_mean = mean(mean_income))
+
+point_est_income_station <- santaclara_income_station$income_mean[2] - santaclara_income_station$income_mean[1]
+```
+
+```{r}
+null_dist <- replicate(1000, {
+  santaclara_income_station <- santaclara_income_station %>%
+  mutate(station = sample(station, n())) %>%
+  group_by(station)  %>%
+  summarize(income_mean = mean(mean_income))
+
+point_est_income_station <- santaclara_income_station$income_mean[2] - santaclara_income_station$income_mean[1]
+})
+
+ggplot(tibble(null_dist), aes(null_dist))+
+  geom_histogram(bins = 1000,
+                 color = "cornflowerblue",
+                 fill = NA) +
+  geom_vline(xintercept = point_est_income_station,
+             color = 'firebrick')+
+  ggtitle("Sample Statistic under Null Hypothesis")
+```
+
+```{r}
+# Calculate p-value
+sum(abs(null_dist) > abs(point_est_income_station))/
+  length(null_dist)
+```
+
+Is there a relationship between median income and max_temp?
+
+H0: The 
+HA:
+
+```{r}
+santaclara_income_temp_lm <- lm(max_temp ~ mean_income,
+                        santaclara_income_station)
+summary(santaclara_income_temp_lm)
+```
+
+```{r}
+beta1_est <- summary(santaclara_income_temp_lm)$coefficients[2,1]
+beta1_se <- summary(santaclara_income_temp_lm)$coefficients[2,2]
+
+tibble(beta1 = seq(-(beta1_est + beta1_se),
+                   beta1_est + beta1_se,
+                   length.out = 200),
+       density = dnorm(beta1, mean = 0, sd = beta1_se)) %>%
+  ggplot(aes(beta1, density)) +
+  geom_line(color = "cornflowerblue")+
+  geom_vline(xintercept =  beta1_est, color = "firebrick")
+```
+
+```{r}
+# Calculate p-value
+pval <- 2*pnorm(-abs(beta1_est), mean = 0, sd = beta1_se)
+pval
+```
+

@@ -335,8 +335,14 @@ santaclara_temp$mean_income <- ifelse((santaclara_temp$date >= 2020) & (santacla
 
 santaclara_temp$mean_income <- ifelse((santaclara_temp$date >= 2020) & (santaclara_temp$date <= 2023) & (santaclara_temp$station == 'Moffett'), moffett_income_23_mean, santaclara_temp$mean_income)
 
-santaclara_temp$max_temp <- as.numeric(santaclara_temp$max_temp) %>%
-  subset('max_temp' != 0)
+santaclara_temp$max_temp <- as.numeric(santaclara_temp$max_temp) 
+
+santaclara_temp$max_temp <- ifelse(santaclara_temp$max_temp > 0, santaclara_temp$max_temp, "")
+
+santaclara_temp <- santaclara_temp %>%
+  filter(max_temp != "")
+
+santaclara_temp$max_temp <- as.numeric(santaclara_temp$max_temp) 
 
 santaclara_temp$mean_income <- as.numeric(santaclara_temp$mean_income)
 ```
@@ -365,7 +371,7 @@ moffett_max_count_total <- moffett %>%
 
 ```{r}
 # Plot example map
-tm_shape(santa_clara_geo_09) +
+tm_shape(santa_clara_geo_23) +
   tm_polygons() +
   tm_shape(sanjose_sf)+
   tm_dots() +
@@ -373,10 +379,10 @@ tm_shape(santa_clara_geo_09) +
   tm_dots()+
   tm_shape(moffett_sf)+
   tm_dots()+
-  tm_shape(sanjose_censustract)+
+  tm_shape(sanjose_censustract_23)+
   tm_polygons(col = 'red')+
-  tm_shape(reidhill_censustract)+
+  tm_shape(reidhill_censustract_23)+
   tm_polygons(col = 'red')+
-  tm_shape(moffett_censustract)+
+  tm_shape(moffett_censustract_23)+
   tm_polygons(col = 'red')
 ```
